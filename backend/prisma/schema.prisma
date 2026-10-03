@@ -1,0 +1,550 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  VENDOR
+  ADMIN
+}
+
+enum RequestStatus {
+  REQUESTED
+  SUBMITTED
+  PENDING_QUOTE
+  QUOTED
+  ACCEPTED
+  REJECTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+  REVIEWED
+}
+
+enum QuoteStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReportStatus {
+  PENDING
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
+enum PriceType {
+  FIXED
+  HOURLY
+  RANGE
+  QUOTE_ONLY
+}
+
+// 1. users
+model User {
+  id           String   @id @default(uuid()) @map("id")
+  email        String   @unique @map("email")
+  passwordHash String   @map("password_hash")
+  role         Role     @default(CUSTOMER) @map("role")
+  isActive     Boolean   @default(true) @map("is_active")
+  isVerified   Boolean   @default(false) @map("is_verified")
+  status       String    @default("ACTIVE") @map("status")
+  deletedAt    DateTime? @map("deleted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  customerProfile     CustomerProfile?
+  vendorProfile       VendorProfile?
+  refreshTokens       RefreshToken[]
+  passwordResets      PasswordReset[]
+  emailVerifications  EmailVerification[]
+  notifications       Notification[]
+  adminAuditLogs      AdminAuditLog[]
+  reportsFiled        Report[]             @relation("ReportsFiled")
+  reportsAgainst      Report[]             @relation("ReportsAgainst")
+  reportsResolved     Report[]             @relation("ReportsResolved")
+  requestStatusChanges RequestStatusHistory[] @relation("StatusChanger")
+  verificationsReviewed VendorVerification[]  @relation("VerificationReviewer")
+  requestComments     RequestComment[]
+
+  @@map("users")
+}
+
+// 2. customer_profiles
+model CustomerProfile {
+  id         String   @id @default(uuid()) @map("id")
+  userId     String   @unique @map("user_id")
+  fullName   String   @map("full_name")
+  phone      String?  @map("phone")
+  address    String?  @map("address")
+  defaultLat        Float?           @map("default_lat")
+  defaultLng        Float?           @map("default_lng")
+  defaultLocationId String?          @map("default_location_id")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultLocation ServiceArea?     @relation("CustomerDefaultLocation", fields: [defaultLocationId], references: [id], onDelete: SetNull)
+  serviceRequests ServiceRequest[]
+  reviews         Review[]
+  favorites       Favorite[]
+
+  @@map("customer_profiles")
+}
+
+// 3. vendor_profiles
+model VendorProfile {
+  id              String   @id @default(uuid()) @map("id")
+  userId          String   @unique @map("user_id")
+  businessName    String   @map("business_name")
+  bio             String?  @map("bio")
+  phone           String   @map("phone")
+  address         String   @map("address")
+  lat             Float    @map("lat")
+  lng             Float    @map("lng")
+  isVerified      Boolean  @default(false) @map("is_verified")
+  isAvailable     Boolean  @default(true) @map("is_available")
+  dutyStatus      String   @default("AVAILABLE") @map("duty_status")
+  responseTimeAvg Int      @default(30) @map("response_time_avg") // minutes
+  ratingAvg       Float    @default(0.0) @map("rating_avg")
+  ratingCount     Int      @default(0) @map("rating_count")
+  avatarUrl       String?              @map("avatar_url")
+  bannerUrl       String?              @map("banner_url")
+  galleryUrls     String[]             @default([]) @map("gallery_urls")
+  profileViews    Int                  @default(0) @map("profile_views")
+  responseRate    Float                @default(1.0) @map("response_rate")
+  cancellationCount Int                @default(0) @map("cancellation_count")
+  isSuspended     Boolean              @default(false) @map("is_suspended")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  // Relations
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendorServices  VendorService[]
+  serviceAreas    ServiceArea[]
+  serviceRequests ServiceRequest[]
+  quotes          Quote[]
+  reviews         Review[]
+  verifications   VendorVerification[]
+  availabilities  VendorAvailability[]
+  timeOffs        VendorTimeOff[]
+  favorites       Favorite[]
+
+  @@index([lat, lng])
+  @@map("vendor_profiles")
+}
+
+// 4. categories
+model Category {
+  id          String   @id @default(uuid()) @map("id")
+  name        String   @map("name")
+  slug        String   @unique @map("slug")
+  icon        String?  @map("icon")
+  description String?  @map("description")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  services Service[]
+
+  @@map("categories")
+}
+
+// 5. services
+model Service {
+  id           String   @id @default(uuid()) @map("id")
+  categoryId   String   @map("category_id")
+  name         String   @map("name")
+  slug         String   @unique @map("slug")
+  description  String?  @map("description")
+  basePriceMin Decimal  @map("base_price_min") @db.Decimal(10, 2)
+  basePriceMax Decimal  @map("base_price_max") @db.Decimal(10, 2)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  category        Category         @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  vendorServices  VendorService[]
+  serviceRequests ServiceRequest[]
+
+  @@map("services")
+}
+
+// 6. vendor_services
+model VendorService {
+  id          String   @id @default(uuid()) @map("id")
+  vendorId    String   @map("vendor_id")
+  serviceId   String   @map("service_id")
+  priceMin    Decimal   @map("price_min") @db.Decimal(10, 2)
+  priceMax    Decimal   @map("price_max") @db.Decimal(10, 2)
+  priceType   PriceType @default(RANGE) @map("price_type")
+  description String?   @map("description")
+  isAvailable Boolean  @default(true) @map("is_available")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  vendor          VendorProfile    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  service         Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  serviceRequests ServiceRequest[]
+
+  @@unique([vendorId, serviceId])
+  @@map("vendor_services")
+}
+
+// 7. service_areas
+model ServiceArea {
+  id         String   @id @default(uuid()) @map("id")
+  vendorId   String?  @map("vendor_id")
+  city       String   @map("city")
+  postalCode String?  @map("postal_code")
+  radiusKm   Float    @default(10.0) @map("radius_km")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  vendor           VendorProfile?    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  customerProfiles CustomerProfile[] @relation("CustomerDefaultLocation")
+
+  @@map("service_areas")
+}
+
+// 8. service_requests
+model ServiceRequest {
+  id                 String        @id @default(uuid()) @map("id")
+  customerId         String        @map("customer_id")
+  vendorId           String?       @map("vendor_id")
+  serviceId          String        @map("service_id")
+  vendorServiceId    String?       @map("vendor_service_id")
+  status             RequestStatus @default(REQUESTED) @map("status")
+  description        String        @map("description")
+  address            String        @map("address")
+  lat                Float?        @map("lat")
+  lng                Float?        @map("lng")
+  preferredDate      String?       @map("preferred_date")
+  preferredTimeSlot  String?       @map("preferred_time_slot")
+  isUrgent           Boolean       @default(false) @map("is_urgent")
+  agreedPrice        Decimal?      @map("agreed_price") @db.Decimal(10, 2)
+  expiresAt          DateTime?     @map("expires_at")
+  respondedAt        DateTime?     @map("responded_at")
+  completedAt        DateTime?     @map("completed_at")
+  cancelledAt        DateTime?     @map("cancelled_at")
+  cancelledBy        String?       @map("cancelled_by")
+  cancellationReason String?       @map("cancellation_reason")
+  rejectionReason    String?       @map("rejection_reason")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  customer      CustomerProfile        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  vendor        VendorProfile?         @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  service       Service                @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  vendorService VendorService?         @relation(fields: [vendorServiceId], references: [id], onDelete: SetNull)
+  quotes        Quote[]
+  statusHistory RequestStatusHistory[]
+  comments      RequestComment[]
+  review        Review?
+  reports       Report[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([vendorId])
+  @@map("service_requests")
+}
+
+// 9. request_status_history
+model RequestStatusHistory {
+  id              String         @id @default(uuid()) @map("id")
+  requestId       String         @map("request_id")
+  fromStatus      RequestStatus? @map("from_status")
+  toStatus        RequestStatus  @map("to_status")
+  previousStatus  RequestStatus? @map("previous_status")
+  newStatus       RequestStatus? @map("new_status")
+  changedByUserId String?        @map("changed_by_user_id")
+  reason          String?        @map("reason")
+  note            String?        @map("note")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  // Relations
+  serviceRequest ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  changedByUser  User?          @relation("StatusChanger", fields: [changedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@map("request_status_history")
+}
+
+// 24. request_comments
+model RequestComment {
+  id        String   @id @default(uuid()) @map("id")
+  requestId String   @map("request_id")
+  userId    String   @map("user_id")
+  message   String   @map("message")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  serviceRequest ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@map("request_comments")
+}
+
+// 10. quotes
+model Quote {
+  id         String      @id @default(uuid()) @map("id")
+  requestId  String      @map("request_id")
+  vendorId   String      @map("vendor_id")
+  amount     Decimal     @map("amount") @db.Decimal(10, 2)
+  notes      String?     @map("notes")
+  status     QuoteStatus @default(PENDING) @map("status")
+  validUntil DateTime?   @map("valid_until")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  request ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  vendor  VendorProfile  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@map("quotes")
+}
+
+// 11. reviews (UNIQUE(request_id) enforced strictly)
+model Review {
+  id              String   @id @default(uuid()) @map("id")
+  requestId       String   @unique @map("request_id")
+  customerId      String   @map("customer_id")
+  vendorId        String   @map("vendor_id")
+  rating          Int      @map("rating") // 1 to 5
+  comment         String?  @map("comment")
+  vendorReply     String?  @map("vendor_reply")
+  vendorRepliedAt DateTime? @map("vendor_replied_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  request  ServiceRequest  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  vendor   VendorProfile   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@map("reviews")
+}
+
+// 12. vendor_verifications
+model VendorVerification {
+  id              String             @id @default(uuid()) @map("id")
+  vendorId        String             @map("vendor_id")
+  status          VerificationStatus @default(PENDING) @map("status")
+  submittedAt     DateTime           @default(now()) @map("submitted_at")
+  reviewedBy      String?            @map("reviewed_by")
+  reviewedAt      DateTime?          @map("reviewed_at")
+  rejectionReason String?            @map("rejection_reason")
+
+  // Relations
+  vendor           VendorProfile          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  reviewedByUser   User?                  @relation("VerificationReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  documents        VerificationDocument[]
+
+  @@map("vendor_verifications")
+}
+
+// 13. verification_documents
+model VerificationDocument {
+  id             String   @id @default(uuid()) @map("id")
+  verificationId String   @map("verification_id")
+  documentType   String   @map("document_type") // e.g., GOVT_ID, BUSINESS_LICENSE, CERTIFICATE
+  documentUrl    String   @map("document_url")
+  isPrivate      Boolean  @default(true) @map("is_private")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  verification VendorVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@map("verification_documents")
+}
+
+// 14. refresh_tokens
+model RefreshToken {
+  id        String   @id @default(uuid()) @map("id")
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revoked   Boolean  @default(false) @map("revoked")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// 15. password_resets
+model PasswordReset {
+  id        String    @id @default(uuid()) @map("id")
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
+// 16. email_verifications
+model EmailVerification {
+  id         String    @id @default(uuid()) @map("id")
+  userId     String    @map("user_id")
+  tokenHash  String    @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verifications")
+}
+
+// 17. notifications
+model Notification {
+  id        String   @id @default(uuid()) @map("id")
+  userId    String   @map("user_id")
+  type      String   @map("type") // e.g. REQUEST_CREATED, QUOTE_RECEIVED, STATUS_UPDATED
+  title     String   @map("title")
+  body      String   @map("body")
+  isRead    Boolean  @default(false) @map("is_read")
+  metadata  Json?    @map("metadata")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// 18. admin_audit_logs
+model AdminAuditLog {
+  id         String   @id @default(uuid()) @map("id")
+  adminId    String   @map("admin_id")
+  action     String   @map("action") // e.g., USER_SUSPEND, VENDOR_VERIFY, REPORT_RESOLVE
+  targetType String   @map("target_type") // e.g., USER, VENDOR, REPORT
+  targetId   String   @map("target_id")
+  details    Json?    @map("details")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  admin User @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@map("admin_audit_logs")
+}
+
+// 19. reports
+model Report {
+  id              String       @id @default(uuid()) @map("id")
+  reporterId      String       @map("reporter_id")
+  reportedUserId  String       @map("reported_user_id")
+  requestId       String?      @map("request_id")
+  reason          String       @map("reason")
+  details         String?      @map("details")
+  status          ReportStatus @default(PENDING) @map("status")
+  resolvedBy      String?      @map("resolved_by")
+  resolutionNotes String?      @map("resolution_notes")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  reporter     User            @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Restrict)
+  reportedUser User            @relation("ReportsAgainst", fields: [reportedUserId], references: [id], onDelete: Restrict)
+  request      ServiceRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  resolver     User?           @relation("ReportsResolved", fields: [resolvedBy], references: [id], onDelete: SetNull)
+
+  @@map("reports")
+}
+
+// 20. vendor_availabilities (Weekly schedule)
+model VendorAvailability {
+  id        String   @id @default(uuid()) @map("id")
+  vendorId  String   @map("vendor_id")
+  dayOfWeek Int      @map("day_of_week") // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  startTime String   @map("start_time")  // HH:MM e.g. "09:00"
+  endTime   String   @map("end_time")    // HH:MM e.g. "17:00"
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  vendor VendorProfile @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, dayOfWeek])
+  @@map("vendor_availabilities")
+}
+
+// 21. vendor_time_off (Blackout dates / vacations)
+model VendorTimeOff {
+  id        String   @id @default(uuid()) @map("id")
+  vendorId  String   @map("vendor_id")
+  startDate DateTime @map("start_date")
+  endDate   DateTime @map("end_date")
+  reason    String?  @map("reason")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  vendor VendorProfile @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, startDate, endDate])
+  @@map("vendor_time_off")
+}
+
+// 22. favorites
+model Favorite {
+  id         String   @id @default(uuid()) @map("id")
+  customerId String   @map("customer_id")
+  vendorId   String   @map("vendor_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  vendor   VendorProfile   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, vendorId])
+  @@map("favorites")
+}
+
+// 23. search_logs
+model SearchLog {
+  id           String   @id @default(uuid()) @map("id")
+  query        String?  @map("query")
+  category     String?  @map("category")
+  service      String?  @map("service")
+  lat          Float?   @map("lat")
+  lng          Float?   @map("lng")
+  radiusKm     Float?   @map("radius_km")
+  resultsCount Int      @default(0) @map("results_count")
+  userId       String?  @map("user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([resultsCount])
+  @@map("search_logs")
+}
