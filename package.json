@@ -1,0 +1,29 @@
+{
+  "name": "karigar-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "कारीगर (Karigar) - India's Trusted Artisans & Hyperlocal Services Platform",
+  "author": "Karigar Team",
+  "license": "MIT",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "install:all": "npm install && npm --workspace=backend install && npm --workspace=frontend install",
+    "dev:backend": "npm --workspace=backend run dev",
+    "dev:frontend": "npm --workspace=frontend run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build:backend": "npm --workspace=backend run build",
+    "build:frontend": "npm --workspace=frontend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "test:backend": "npm --workspace=backend run test",
+    "test": "npm run test:backend",
+    "prisma:generate": "npm --workspace=backend run prisma:generate",
+    "prisma:push": "npm --workspace=backend run prisma:push",
+    "prisma:seed": "npm --workspace=backend run prisma:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
